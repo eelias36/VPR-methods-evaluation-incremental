@@ -5,10 +5,16 @@ def parse_arguments():
     parser = argparse.ArgumentParser(formatter_class=argparse.ArgumentDefaultsHelpFormatter)
 
     parser.add_argument(
-        "--positive_dist_threshold",
+        "--angle_threshold",
         type=int,
-        default=25,
-        help="distance (in meters) for a prediction to be considered a positive",
+        default=5,
+        help="angle (in degrees) for a prediction to be considered a positive",
+    )
+    parser.add_argument(
+        "--recent_frames_window",
+        type=int,
+        default=50,
+        help="how many previous frames to ignore when evaluating a query",
     )
     parser.add_argument(
         "--method",
@@ -50,8 +56,7 @@ def parse_arguments():
         help="_",
     )
     parser.add_argument("--descriptors_dimension", type=int, default=None, help="_")
-    parser.add_argument("--database_folder", type=str, required=True, help="path/to/database")
-    parser.add_argument("--queries_folder", type=str, required=True, help="path/to/queries")
+    parser.add_argument("--img_folder", type=str, required=True, help="path/to/imgs")
     parser.add_argument("--num_workers", type=int, default=4, help="_")
     parser.add_argument(
         "--batch_size", type=int, default=4, help="set to 1 if database images may have different resolution"

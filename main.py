@@ -35,51 +35,62 @@ def main(args):
     model = model.eval().to(args.device)
 
     test_ds = TestDataset(
-        args.database_folder,
-        args.queries_folder,
-        positive_dist_threshold=args.positive_dist_threshold,
+        args.img_folder,
+        angle_threshold=args.angle_threshold,
         image_size=args.image_size,
         use_labels=args.use_labels,
     )
     logger.info(f"Testing on {test_ds}")
 
     with torch.inference_mode():
-        logger.debug("Extracting database descriptors for evaluation/testing")
-        database_subset_ds = Subset(test_ds, list(range(test_ds.num_database)))
-        database_dataloader = DataLoader(
-            dataset=database_subset_ds, num_workers=args.num_workers, batch_size=args.batch_size
+
+        logger.debug("Extracting image descriptors for initial frames within recent_frames_window")
+
+        # Get descriptors for the first set of images within the recent_frames_window
+        recent_frames_indices = np.where(test_ds.frame_numbers < args.recent_frames_window)[0]
+        init_subset_ds = Subset(test_ds, list(recent_frames_indices))
+        init_subset_dataloader = DataLoader(
+            dataset=init_subset_ds, num_workers=args.num_workers, batch_size=args.batch_size
         )
-        all_descriptors = np.empty((len(test_ds), args.descriptors_dimension), dtype="float32")
-        for images, indices in tqdm(database_dataloader):
+        database_descriptors = np.empty((args.recent_frames_window, args.descriptors_dimension), dtype="float32")
+        query_descriptors = np.empty((1, args.descriptors_dimension), dtype="float32")
+        for images, indices in tqdm(init_subset_dataloader):
             descriptors = model(images.to(args.device))
             descriptors = descriptors.cpu().numpy()
-            all_descriptors[indices.numpy(), :] = descriptors
+            database_descriptors[indices.numpy(), :] = descriptors
 
-        logger.debug("Extracting queries descriptors for evaluation/testing using batch size 1")
-        queries_subset_ds = Subset(
-            test_ds, list(range(test_ds.num_database, test_ds.num_database + test_ds.num_queries))
-        )
-        queries_dataloader = DataLoader(dataset=queries_subset_ds, num_workers=args.num_workers, batch_size=1)
-        for images, indices in tqdm(queries_dataloader):
-            descriptors = model(images.to(args.device))
-            descriptors = descriptors.cpu().numpy()
-            all_descriptors[indices.numpy(), :] = descriptors
+        # Use a kNN to find predictions
+        faiss_index = faiss.IndexFlatL2(args.descriptors_dimension)
+        faiss_index.add(database_descriptors)
 
-    queries_descriptors = all_descriptors[test_ds.num_database :]
-    database_descriptors = all_descriptors[: test_ds.num_database]
+        predictions = np.empty((test_ds.num_imgs - args.recent_frames_window, max(args.recall_values)), dtype="int64")
 
-    if args.save_descriptors:
-        logger.info(f"Saving the descriptors in {log_dir}")
-        np.save(log_dir / "queries_descriptors.npy", queries_descriptors)
-        np.save(log_dir / "database_descriptors.npy", database_descriptors)
+        for frame_number in range(args.recent_frames_window, test_ds.num_imgs):
+      
+            logger.debug(f"Extracting descriptors for query frame #{frame_number} with name {test_ds.images_paths[np.where(test_ds.frame_numbers == frame_number)[0][0]]} using batch size 1")
+            queries_subset_ds = Subset(
+                test_ds, list([np.where(test_ds.frame_numbers == frame_number)[0][0]])
+            )
+            query_dataloader = DataLoader(dataset=queries_subset_ds, num_workers=args.num_workers, batch_size=1)
+            for images, indices in tqdm(query_dataloader):
+                descriptors = model(images.to(args.device))
+                query_descriptors = descriptors.cpu().numpy()
 
-    # Use a kNN to find predictions
-    faiss_index = faiss.IndexFlatL2(args.descriptors_dimension)
-    faiss_index.add(database_descriptors)
-    del database_descriptors, all_descriptors
+            if args.save_descriptors:
+                logger.info(f"Saving the descriptors in {log_dir}")
+                np.save(log_dir / "queries_descriptors.npy", query_descriptors)
+                np.save(log_dir / "database_descriptors.npy", database_descriptors)
 
-    logger.debug("Calculating recalls")
-    _, predictions = faiss_index.search(queries_descriptors, max(args.recall_values))
+            
+            logger.debug(f"Finding matches for query frame {frame_number}")
+            _, predictions[frame_number - args.recent_frames_window, :] = faiss_index.search(query_descriptors, max(args.recall_values))
+            faiss_index.add(query_descriptors)
+
+            logger.debug(f"Predictions for query frame {frame_number}: {predictions[frame_number - args.recent_frames_window, :]}")
+    
+    del database_descriptors
+           
+    print(predictions)
 
     # For each query, check if the predictions are correct
     if args.use_labels:
