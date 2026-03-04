@@ -109,6 +109,8 @@ class TestDataset(data.Dataset):
     def __getitem__(self, index):
         image_path = self.images_paths[index]
         pil_img = Image.open(image_path).convert("RGB")
+        if pil_img.mode == "I;16":
+            pil_img = pil_img.point(lambda x: x / 256).convert("L").convert("RGB")
         normalized_img = self.transform(pil_img)
         return normalized_img, index
 

@@ -44,7 +44,7 @@ def main(args):
 
     with torch.inference_mode():
 
-        logger.debug("Extracting image descriptors for initial frames within recent_frames_window")
+        logger.info("Extracting image descriptors for initial frames within recent_frames_window")
 
         # Get descriptors for the first set of images within the recent_frames_window
         recent_frames_indices = np.where(test_ds.frame_numbers < args.recent_frames_window)[0]
@@ -65,14 +65,16 @@ def main(args):
 
         predictions = np.empty((test_ds.num_imgs - args.recent_frames_window, max(args.recall_values)), dtype="int64")
 
-        for frame_number in range(args.recent_frames_window, test_ds.num_imgs):
+        logger.info("Finding predictions for each image")
+
+        for frame_number in tqdm(range(args.recent_frames_window, test_ds.num_imgs)):
       
             logger.debug(f"Extracting descriptors for query frame #{frame_number} with name {test_ds.images_paths[np.where(test_ds.frame_numbers == frame_number)[0][0]]} using batch size 1")
             queries_subset_ds = Subset(
                 test_ds, list([np.where(test_ds.frame_numbers == frame_number)[0][0]])
             )
             query_dataloader = DataLoader(dataset=queries_subset_ds, num_workers=args.num_workers, batch_size=1)
-            for images, indices in tqdm(query_dataloader):
+            for images, indices in query_dataloader:
                 descriptors = model(images.to(args.device))
                 query_descriptors = descriptors.cpu().numpy()
 
@@ -112,7 +114,7 @@ def main(args):
         logger.info("Saving final predictions")
         # For each query save num_preds_to_save predictions
         visualizations.save_preds(
-            predictions[:, : args.num_preds_to_save], test_ds, log_dir, args.save_only_wrong_preds, args.use_labels
+            predictions[:, : args.num_preds_to_save], test_ds, log_dir, args.save_only_wrong_preds, args.use_labels, args.recent_frames_window
         )
 
 

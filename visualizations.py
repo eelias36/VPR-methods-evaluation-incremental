@@ -1,3 +1,5 @@
+from pathlib import Path
+
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 from tqdm import tqdm
@@ -48,7 +50,9 @@ def build_prediction_image(images_paths, preds_correct):
         else:
             labels.append(f"Pred{i} - {is_correct}")
 
-    images = [Image.open(path).convert("RGB") for path in images_paths]
+    images = [Image.open(path) for path in images_paths]
+    # Convert from 16-bit to 8-bit if needed
+    images = [img.point(lambda x: x / 256).convert("L").convert("RGB") if img.mode == "I;16" else img.convert("RGB") for img in images]
     for img_idx, (img, is_correct) in enumerate(zip(images, preds_correct)):
         if is_correct is None:
             continue
@@ -89,7 +93,7 @@ def save_file_with_paths(query_path, preds_paths, positives_paths, output_path, 
         _ = file.write("\n".join(file_content))
 
 
-def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_labels=True):
+def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_labels=True, recent_frames_window=0):
     """For each query, save an image containing the query and its predictions,
     and a file with the paths of the query, its predictions and its positives.
 
@@ -108,7 +112,7 @@ def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_la
     viz_dir = log_dir / "preds"
     viz_dir.mkdir()
     for query_index, preds in enumerate(tqdm(predictions, desc=f"Saving preds in {viz_dir}")):
-        query_path = eval_ds.images_paths[query_index]
+        query_path = eval_ds.images_paths[query_index + recent_frames_window]
         list_of_images_paths = [query_path]
         # List of None (query), True (correct preds) or False (wrong preds)
         preds_correct = [None]
@@ -125,17 +129,18 @@ def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_la
             continue
 
         prediction_image = build_prediction_image(list_of_images_paths, preds_correct)
-        pred_image_path = viz_dir / f"{query_index:03d}.jpg"
+        pred_image_path = viz_dir / f"{Path(query_path).stem}.jpg"
         prediction_image.save(pred_image_path)
 
         if use_labels:
             positives_paths = [eval_ds.images_paths[idx] for idx in positives_per_query[query_index]]
         else:
             positives_paths = None
+
         save_file_with_paths(
             query_path=list_of_images_paths[0],
             preds_paths=list_of_images_paths[1:],
             positives_paths=positives_paths,
-            output_path=viz_dir / f"{query_index:03d}.txt",
+            output_path=viz_dir / f"{Path(query_path).stem}.txt",
             use_labels=use_labels,
         )
