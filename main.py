@@ -44,30 +44,17 @@ def main(args):
 
     with torch.inference_mode():
 
-        logger.info("Extracting image descriptors for initial frames within recent_frames_window")
-
-        # Get descriptors for the first set of images within the recent_frames_window
-        recent_frames_indices = np.where(test_ds.frame_numbers < args.recent_frames_window)[0]
-        init_subset_ds = Subset(test_ds, list(recent_frames_indices))
-        init_subset_dataloader = DataLoader(
-            dataset=init_subset_ds, num_workers=args.num_workers, batch_size=args.batch_size
-        )
-        database_descriptors = np.empty((args.recent_frames_window, args.descriptors_dimension), dtype="float32")
-        query_descriptors = np.empty((1, args.descriptors_dimension), dtype="float32")
-        for images, indices in tqdm(init_subset_dataloader):
-            descriptors = model(images.to(args.device))
-            descriptors = descriptors.cpu().numpy()
-            database_descriptors[indices.numpy(), :] = descriptors
+        query_descriptor = np.empty((1, args.descriptors_dimension), dtype="float32")
 
         # Use a kNN to find predictions
         faiss_index = faiss.IndexFlatL2(args.descriptors_dimension)
-        faiss_index.add(database_descriptors)
 
         predictions = np.empty((test_ds.num_imgs - args.recent_frames_window, max(args.recall_values)), dtype="int64")
+        descriptor_queue = []
 
         logger.info("Finding predictions for each image")
 
-        for frame_number in tqdm(range(args.recent_frames_window, test_ds.num_imgs)):
+        for frame_number in tqdm(range(test_ds.num_imgs)):
       
             logger.debug(f"Extracting descriptors for query frame #{frame_number} with name {test_ds.images_paths[np.where(test_ds.frame_numbers == frame_number)[0][0]]} using batch size 1")
             queries_subset_ds = Subset(
@@ -76,17 +63,19 @@ def main(args):
             query_dataloader = DataLoader(dataset=queries_subset_ds, num_workers=args.num_workers, batch_size=1)
             for images, indices in query_dataloader:
                 descriptors = model(images.to(args.device))
-                query_descriptors = descriptors.cpu().numpy()
+                query_descriptor = descriptors.cpu().numpy()
 
             if args.save_descriptors:
                 logger.info(f"Saving the descriptors in {log_dir}")
-                np.save(log_dir / "queries_descriptors.npy", query_descriptors)
+                np.save(log_dir / "queries_descriptors.npy", query_descriptor)
                 np.save(log_dir / "database_descriptors.npy", database_descriptors)
 
+            if frame_number > args.recent_frames_window:
+                faiss_index.add(descriptor_queue.pop(0))
+                logger.debug(f"Finding matches for query frame {frame_number}")
+                _, predictions[frame_number - args.recent_frames_window, :] = faiss_index.search(query_descriptor, max(args.recall_values))
             
-            logger.debug(f"Finding matches for query frame {frame_number}")
-            _, predictions[frame_number - args.recent_frames_window, :] = faiss_index.search(query_descriptors, max(args.recall_values))
-            faiss_index.add(query_descriptors)
+            descriptor_queue.append(query_descriptor)
 
             logger.debug(f"Predictions for query frame {frame_number}: {predictions[frame_number - args.recent_frames_window, :]}")
     
