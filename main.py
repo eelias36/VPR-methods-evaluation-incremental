@@ -49,7 +49,8 @@ def main(args):
         # Use a kNN to find predictions
         faiss_index = faiss.IndexFlatL2(args.descriptors_dimension)
 
-        predictions = np.empty((test_ds.num_imgs - args.recent_frames_window, max(args.recall_values)), dtype="int64")
+        predictions = np.empty((test_ds.num_imgs - args.recent_frames_window - 1, max(args.recall_values)), dtype="int64")
+        all_descriptors = np.empty((test_ds.num_imgs, args.descriptors_dimension), dtype="float32")
         descriptor_queue = []
 
         logger.info("Finding predictions for each image")
@@ -65,23 +66,31 @@ def main(args):
                 descriptors = model(images.to(args.device))
                 query_descriptor = descriptors.cpu().numpy()
 
-            if args.save_descriptors:
-                logger.info(f"Saving the descriptors in {log_dir}")
-                np.save(log_dir / "queries_descriptors.npy", query_descriptor)
-                np.save(log_dir / "database_descriptors.npy", database_descriptors)
-
             if frame_number > args.recent_frames_window:
                 faiss_index.add(descriptor_queue.pop(0))
                 logger.debug(f"Finding matches for query frame {frame_number}")
-                _, predictions[frame_number - args.recent_frames_window, :] = faiss_index.search(query_descriptor, max(args.recall_values))
+                # _, predictions[frame_number - args.recent_frames_window - 1, :] = faiss_index.search(query_descriptor, max(args.recall_values))
+
+                lims, dists, pred = faiss_index.range_search(query_descriptor, 0.1)
+                pred = pred[np.argsort(dists)]
+
+                # Fit predictions into array of length max(args.recall_values)
+                if len(pred) > max(args.recall_values):
+                    pred = pred[:max(args.recall_values)]        # truncate
+                elif len(pred) < max(args.recall_values):
+                    pred = np.pad(pred, (0, max(args.recall_values) - len(pred)), constant_values=-1)
+                predictions[frame_number - args.recent_frames_window - 1, :] = pred
+
+                logger.debug(f"Predictions for query frame {frame_number}: {predictions[frame_number - args.recent_frames_window - 1, :]}")
             
             descriptor_queue.append(query_descriptor)
-
-            logger.debug(f"Predictions for query frame {frame_number}: {predictions[frame_number - args.recent_frames_window, :]}")
-    
-    del database_descriptors
+            all_descriptors[frame_number, : ] = query_descriptor
+            
            
     print(predictions)
+    if args.save_descriptors:
+        logger.info(f"Saving the descriptors in {log_dir}")
+        np.save(log_dir / "descriptors.npy", all_descriptors)
 
     # For each query, check if the predictions are correct
     if args.use_labels:
