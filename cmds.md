@@ -1,0 +1,1 @@
+python3 main.py --method=eigenplaces --img_folder='/home/ericelias/Desktop/repos/VPR-codebase/VPR-methods-evaluation/assets/spacecraft_small' --recent_frames_window 100  --no_labels --num_preds_to_save 3 --log_dir spacecraft --device cpu --recall_values 3 --save_descriptors --save_matched_pairs

@@ -17,6 +17,11 @@ def parse_arguments():
         help="how many previous frames to ignore when evaluating a query",
     )
     parser.add_argument(
+        "--save_matched_pairs",
+        action="store_true",
+        help="set to true if you want to save filenames of matching pairs",
+    )
+    parser.add_argument(
         "--method",
         type=str,
         default="megaloc",

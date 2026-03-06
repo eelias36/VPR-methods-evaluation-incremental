@@ -107,6 +107,10 @@ def main(args):
         recalls_str = ", ".join([f"R@{val}: {rec:.1f}" for val, rec in zip(args.recall_values, recalls)])
         logger.info(recalls_str)
 
+    if args.save_matched_pairs:
+        logger.info(f"Saving matching pairs in {log_dir}")
+        visualizations.save_matching_pairs(predictions, test_ds, log_dir, args.recent_frames_window)
+
     # Save visualizations of predictions
     if args.num_preds_to_save != 0:
         logger.info("Saving final predictions")

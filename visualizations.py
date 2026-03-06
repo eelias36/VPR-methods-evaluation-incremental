@@ -6,13 +6,13 @@ from tqdm import tqdm
 import torch
 from PIL import Image, ImageOps
 import torchvision.transforms as tfm
+import csv
 
 # Height and width of a single image for visualization
 IMG_HW = 512
 TEXT_H = 175
 FONTSIZE = 50
 SPACE = 50  # Space between two images
-
 
 def write_labels_to_image(labels=["text1", "text2"]):
     """Creates an image with text"""
@@ -36,6 +36,18 @@ def draw_box(img, c=(0, 1, 0), thickness=20):
     img[..., :, -thickness:] = c
     img[..., :, :thickness] = c
     return tfm.ToPILImage()(img)
+
+def save_matching_pairs(predictions, eval_ds, log_dir, recent_frames_window=0):
+    """ Save a csv file containing the query and prediction for all matches."""
+    with open(log_dir / "matching_pairs.csv", mode="w", newline="") as file:
+        writer = csv.writer(file)
+        writer.writerow(["query_path", "pred_path"])
+        for query_index, preds in enumerate(tqdm(predictions, desc=f"Saving matches in {log_dir}")):
+            query_path = eval_ds.images_paths[query_index + recent_frames_window + 1]
+            for pred in preds:
+                if pred > -1:
+                    pred_path = eval_ds.images_paths[pred]
+                    writer.writerow([Path(query_path).stem, Path(pred_path).stem])
 
 
 def build_prediction_image(images_paths, preds_correct):
