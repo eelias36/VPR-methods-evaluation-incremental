@@ -66,7 +66,7 @@ class TestDataset(data.Dataset):
         filename_numbers = np.array([int(os.path.splitext(os.path.basename(path))[0]) for path in self.images_paths])
         
         # Assign frame numbers to images in order of their filename number, starting from 0
-        self.frame_numbers = np.argsort(filename_numbers)
+        self.frame_numbers = filename_numbers
 
         self.num_imgs = len(self.images_paths)
 
@@ -122,3 +122,7 @@ class TestDataset(data.Dataset):
 
     def get_positives(self):
         return self.positives_per_query
+    
+    def frame_number_to_image_path(self, frame_number):
+        index = np.where(self.frame_numbers == frame_number)[0][0]
+        return self.images_paths[index]

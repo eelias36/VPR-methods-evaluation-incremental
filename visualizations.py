@@ -37,16 +37,16 @@ def draw_box(img, c=(0, 1, 0), thickness=20):
     img[..., :, :thickness] = c
     return tfm.ToPILImage()(img)
 
-def save_matching_pairs(predictions, eval_ds, log_dir, recent_frames_window=0):
+def save_matching_pairs(predictions, eval_ds, log_dir):
     """ Save a csv file containing the query and prediction for all matches."""
     with open(log_dir / "matching_pairs.csv", mode="w", newline="") as file:
         writer = csv.writer(file)
         writer.writerow(["query_path", "pred_path"])
         for query_index, preds in enumerate(tqdm(predictions, desc=f"Saving matches in {log_dir}")):
-            query_path = eval_ds.images_paths[query_index + recent_frames_window + 1]
+            query_path = eval_ds.frame_number_to_image_path(query_index)
             for pred in preds:
                 if pred > -1:
-                    pred_path = eval_ds.images_paths[pred]
+                    pred_path = eval_ds.frame_number_to_image_path(pred)
                     writer.writerow([Path(query_path).stem, Path(pred_path).stem])
 
 
@@ -105,7 +105,7 @@ def save_file_with_paths(query_path, preds_paths, positives_paths, output_path, 
         _ = file.write("\n".join(file_content))
 
 
-def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_labels=True, recent_frames_window=0):
+def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_labels=True):
     """For each query, save an image containing the query and its predictions,
     and a file with the paths of the query, its predictions and its positives.
 
@@ -124,13 +124,13 @@ def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_la
     viz_dir = log_dir / "preds"
     viz_dir.mkdir()
     for query_index, preds in enumerate(tqdm(predictions, desc=f"Saving preds in {viz_dir}")):
-        query_path = eval_ds.images_paths[query_index + recent_frames_window + 1]
+        query_path = eval_ds.frame_number_to_image_path(query_index)
         list_of_images_paths = [query_path]
         # List of None (query), True (correct preds) or False (wrong preds)
         preds_correct = [None]
         for pred_index, pred in enumerate(preds):
             if pred > -1:
-                pred_path = eval_ds.images_paths[pred]
+                pred_path = eval_ds.frame_number_to_image_path(pred)
                 list_of_images_paths.append(pred_path)
                 if use_labels:
                     is_correct = pred in positives_per_query[query_index]
@@ -141,12 +141,16 @@ def save_preds(predictions, eval_ds, log_dir, save_only_wrong_preds=None, use_la
         if save_only_wrong_preds and preds_correct[1]:
             continue
 
+        # save only if there is at least one match
+        if len(list_of_images_paths) == 1:
+            continue
+
         prediction_image = build_prediction_image(list_of_images_paths, preds_correct)
         pred_image_path = viz_dir / f"{Path(query_path).stem}.jpg"
         prediction_image.save(pred_image_path)
 
         if use_labels:
-            positives_paths = [eval_ds.images_paths[idx] for idx in positives_per_query[query_index]]
+            positives_paths = [eval_ds.frame_number_to_image_path(idx) for idx in positives_per_query[query_index]]
         else:
             positives_paths = None
 

@@ -14,6 +14,7 @@ from tqdm import tqdm
 import visualizations
 import vpr_models
 from test_dataset import TestDataset
+import time
 
 
 def main(args):
@@ -42,6 +43,12 @@ def main(args):
     )
     logger.info(f"Testing on {test_ds}")
 
+    total_descriptor_extraction_time = 0
+    num_descriptor_extractions = 0
+
+    total_search_time = 0
+    num_searches = 0
+
     with torch.inference_mode():
 
         query_descriptor = np.empty((1, args.descriptors_dimension), dtype="float32")
@@ -49,7 +56,7 @@ def main(args):
         # Use a kNN to find predictions
         faiss_index = faiss.IndexFlatL2(args.descriptors_dimension)
 
-        predictions = np.empty((test_ds.num_imgs - args.recent_frames_window - 1, max(args.recall_values)), dtype="int64")
+        predictions = np.empty((test_ds.num_imgs, max(args.recall_values)), dtype="int64")
         all_descriptors = np.empty((test_ds.num_imgs, args.descriptors_dimension), dtype="float32")
         descriptor_queue = []
 
@@ -57,21 +64,36 @@ def main(args):
 
         for frame_number in tqdm(range(test_ds.num_imgs)):
       
-            logger.debug(f"Extracting descriptors for query frame #{frame_number} with name {test_ds.images_paths[np.where(test_ds.frame_numbers == frame_number)[0][0]]} using batch size 1")
+            logger.debug(f"Extracting descriptors for query frame #{frame_number} with name {test_ds.frame_number_to_image_path(frame_number)} using batch size 1")
             queries_subset_ds = Subset(
                 test_ds, list([np.where(test_ds.frame_numbers == frame_number)[0][0]])
             )
             query_dataloader = DataLoader(dataset=queries_subset_ds, num_workers=args.num_workers, batch_size=1)
             for images, indices in query_dataloader:
+                start = time.perf_counter()
+                
                 descriptors = model(images.to(args.device))
                 query_descriptor = descriptors.cpu().numpy()
+
+                elapsed = time.perf_counter() - start
+                logger.debug(f"Descriptor extraction took {elapsed:.4f}s")
+                total_descriptor_extraction_time += elapsed
+                num_descriptor_extractions += 1
 
             if frame_number > args.recent_frames_window:
                 faiss_index.add(descriptor_queue.pop(0))
                 logger.debug(f"Finding matches for query frame {frame_number}")
                 # _, predictions[frame_number - args.recent_frames_window - 1, :] = faiss_index.search(query_descriptor, max(args.recall_values))
 
-                lims, dists, pred = faiss_index.range_search(query_descriptor, 0.1)
+                start = time.perf_counter()
+
+                lims, dists, pred = faiss_index.range_search(query_descriptor, 0.5) # 0.1
+
+                elapsed = time.perf_counter() - start
+                logger.debug(f"Descriptor search took {elapsed:.4f}s")
+                total_search_time += elapsed
+                num_searches += 1
+
                 pred = pred[np.argsort(dists)]
 
                 # Fit predictions into array of length max(args.recall_values)
@@ -79,15 +101,22 @@ def main(args):
                     pred = pred[:max(args.recall_values)]        # truncate
                 elif len(pred) < max(args.recall_values):
                     pred = np.pad(pred, (0, max(args.recall_values) - len(pred)), constant_values=-1)
-                predictions[frame_number - args.recent_frames_window - 1, :] = pred
+                predictions[frame_number, :] = pred
 
-                logger.debug(f"Predictions for query frame {frame_number}: {predictions[frame_number - args.recent_frames_window - 1, :]}")
+                logger.debug(f"Predictions for query frame {frame_number}: {predictions[frame_number, :]}")
             
+            else:
+                logger.debug(f"Not finding matches for query frame {frame_number} because it is within the recent frames window of size {args.recent_frames_window}")
+                predictions[frame_number, :] = -1
+
             descriptor_queue.append(query_descriptor)
             all_descriptors[frame_number, : ] = query_descriptor
             
            
     print(predictions)
+    logger.info(f"Average descriptor extraction time: {total_descriptor_extraction_time / num_descriptor_extractions:.4f}s")
+    logger.info(f"Average search time: {total_search_time / num_searches:.4f}s")
+
     if args.save_descriptors:
         logger.info(f"Saving the descriptors in {log_dir}")
         np.save(log_dir / "descriptors.npy", all_descriptors)
@@ -109,14 +138,14 @@ def main(args):
 
     if args.save_matched_pairs:
         logger.info(f"Saving matching pairs in {log_dir}")
-        visualizations.save_matching_pairs(predictions, test_ds, log_dir, args.recent_frames_window)
+        visualizations.save_matching_pairs(predictions, test_ds, log_dir)
 
     # Save visualizations of predictions
     if args.num_preds_to_save != 0:
         logger.info("Saving final predictions")
         # For each query save num_preds_to_save predictions
         visualizations.save_preds(
-            predictions[:, : args.num_preds_to_save], test_ds, log_dir, args.save_only_wrong_preds, args.use_labels, args.recent_frames_window
+            predictions[:, : args.num_preds_to_save], test_ds, log_dir, args.save_only_wrong_preds, args.use_labels
         )
 
 
