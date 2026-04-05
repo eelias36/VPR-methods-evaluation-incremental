@@ -87,7 +87,7 @@ def main(args):
 
                 start = time.perf_counter()
 
-                lims, dists, pred = faiss_index.range_search(query_descriptor, 0.5) # 0.1
+                lims, dists, pred = faiss_index.range_search(query_descriptor, args.match_distance_threshold)
 
                 elapsed = time.perf_counter() - start
                 logger.debug(f"Descriptor search took {elapsed:.4f}s")

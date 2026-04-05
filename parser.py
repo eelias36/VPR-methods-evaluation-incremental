@@ -11,6 +11,12 @@ def parse_arguments():
         help="angle (in degrees) for a prediction to be considered a positive",
     )
     parser.add_argument(
+        "--match_distance_threshold",
+        type=float,
+        default=0.1,
+        help="distance threshold for a prediction to be considered a positive",
+    )
+    parser.add_argument(
         "--recent_frames_window",
         type=int,
         default=50,
